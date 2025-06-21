@@ -3,6 +3,8 @@ import sys
 import io
 from bs4 import BeautifulSoup, element
 import re
+import os
+import os.path
 
 
 # The whole code is patched together in around 30 mins
@@ -20,9 +22,25 @@ def main() -> None:
 
         url: str
         index: int = 0
+        curr_path = os.getcwd()
         for url in file.readlines():
-            if len(url) == 0:
+            if len(url.strip()) == 0:
                 break
+            url = url.strip()
+            if (url[0] == '#'):
+                continue
+            if (url[0] == '!'):
+                new_path = url[1:]
+                if (not(os.path.exists(new_path))):
+                    try:
+                        os.makedirs(new_path)
+                        curr_path = new_path
+                    except OSError as e:
+                        print("Directory " + new_path + " cannot be created, skipping setting current directory to that")
+                        continue
+                else:
+                    curr_path = new_path
+                continue
             
             http_index: int = url.find("http") # we are assuming only few characters can be before the actual url, like " - http://example.com"
             if http_index < 0:
@@ -33,7 +51,7 @@ def main() -> None:
             resp: requests.Response = requests.get(url)
             soup: BeautifulSoup = BeautifulSoup(resp.content, "html.parser")
             scripts: set = soup.find_all("script")
-
+            
             tag: element.Tag
             for _, tag in enumerate(scripts):
                 if "function download()" in tag.text: # Current hard-coding based upon inspection
@@ -53,10 +71,22 @@ def main() -> None:
                                 print("Cannot find filename, resorting to index: {}".format(index))
                                 file_name = str(index)
 
-                            print("Downloading {} to {}".format(file_url, file_name))
-                            with open(file_name, "wb") as download_file:
-                                for chunk in download_resp.iter_content(chunk_size=1024*1024):
-                                    download_file.write(chunk)
+                            print("Downloading {} to {}".format(file_url, os.path.join(curr_path, file_name)))
+                            with open(os.path.join(curr_path, file_name), "wb") as download_file:
+                                big_chunk = None
+                                for chunk in download_resp.iter_content(chunk_size=8*1024*1024):
+                                    if big_chunk is None:
+                                        big_chunk = chunk
+                                    else:
+                                        big_chunk += chunk
+                                    
+                                    if len(big_chunk) >= 64 * 1024 * 1024:
+                                        download_file.write(big_chunk)
+                                        big_chunk = None
+                                        
+                                if big_chunk is not None:
+                                    download_file.write(big_chunk)
+                                    big_chunk = None
     except Exception as e:
         print("Exception: " + e)
         sys.exit(1)
